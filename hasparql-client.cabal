@@ -33,8 +33,7 @@ Library
   Build-depends: 
     base >= 4 && < 5,
     HTTP >= 4,
-    monads-fd,
-    -- mtl == 2.0.*,
+    mtl == 2.0.*,
     xml,
     network
 
