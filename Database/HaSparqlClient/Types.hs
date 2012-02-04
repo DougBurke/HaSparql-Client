@@ -25,7 +25,7 @@ data Service = Sparql{ endpoint :: Endpoint,
                 query :: Query, 
                 defaultgraph :: DefaultGraph, 
                 namedgraph :: [NamedGraph], 
-                optionalparameters :: [(ExtraParameters)]
+                optionalparameters :: [ExtraParameters]
                 } deriving (Eq, Show)
 
 -- | Represents a SPARQL endpoint.

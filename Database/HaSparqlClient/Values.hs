@@ -48,10 +48,10 @@ bnodeValue _ = Nothing
 
 -- | Get the value for a 'BindingValue'. Return 'Nothing' if BindingValue is 'Unbound'.
 value :: BindingValue -> Maybe String
-value res = case (uriValue res) of
-				Nothing -> case (literalValue res) of
-							Nothing -> case (bnodeValue res) of
-									Nothing -> Nothing
-									Just bno -> Just bno
-							Just lit -> Just lit
-				Just uri -> Just uri
+value res = case uriValue res of
+  Nothing -> case literalValue res of
+    Nothing -> case bnodeValue res of
+      Nothing -> Nothing
+      Just bno -> Just bno
+    Just lit -> Just lit
+  Just uri -> Just uri

@@ -109,12 +109,13 @@ parseSparqlBindings vars doc = map pVar vars
                         
 -- Parse the XML document and returns the Boolean value as Maybe Bool 
 parseSparqlBooleanResult  :: Element -> Maybe Bool
-parseSparqlBooleanResult doc =  case (findElement (QName "boolean" quri Nothing) doc) of
-                                    Just e -> case (strContent e) of
-                                      "true" -> Just True
-                                      "false" -> Just False
-                                      _ -> Nothing
-                                    _ -> Nothing
+parseSparqlBooleanResult doc =
+  case findElement (QName "boolean" quri Nothing) doc of
+    Just e -> case strContent e of
+      "true" -> Just True
+      "false" -> Just False
+      _ -> Nothing
+    _ -> Nothing
 
 -- Transform an XML element in a BindingValue.                                                          
 elementBinding :: Element -> BindingValue
@@ -138,9 +139,13 @@ mountRequest ::
   Method
   -> (URI, [(String, String)])
   -> Request String
-mountRequest m (uri,params) = case m of
-                HPOST -> (Request uri POST [mkHeader HdrContentType "application/x-www-form-urlencoded", mkHeader HdrAccept accept, mkHeader HdrContentLength (show $ length $ urlEncodeVars params), mkHeader HdrUserAgent "hasparql-client-0.1"] (urlEncodeVars params))
-                _ -> insertHeaders [mkHeader HdrAccept accept] (getRequest $ show uri ++ "?" ++ urlEncodeVars params)
+mountRequest m (uri,params) = 
+  case m of
+    HPOST -> Request uri POST [ mkHeader HdrContentType "application/x-www-form-urlencoded"
+                              , mkHeader HdrAccept accept
+                              , mkHeader HdrContentLength (show $ length $ urlEncodeVars params)
+                              , mkHeader HdrUserAgent "hasparql-client-0.1"] (urlEncodeVars params)
+    HGET -> insertHeaders [mkHeader HdrAccept accept] (getRequest $ show uri ++ "?" ++ urlEncodeVars params)
 
 
 -- Parse XML documents depending on the generic function in the argument.                 
