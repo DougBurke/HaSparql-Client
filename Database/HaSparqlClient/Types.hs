@@ -53,4 +53,5 @@ type Value = String
 data Method = HGET | HPOST deriving (Eq, Show)
 
 -- | Just a example.
+defaultService :: Service
 defaultService = Sparql "http://dbpedia.org/sparql" "select ?s ?p ?o where {?s ?p ?o} limit 1" Nothing [] []

@@ -21,12 +21,12 @@ instance ShowQuery BindingValue where
 
 -- | Get the language value for a 'BindingValue'. Return 'Nothing' if 'BindingValue' is not 'LangLiteral'.
 languageValue :: BindingValue -> Maybe String
-languageValue (LangLiteral str lan) = Just lan
+languageValue (LangLiteral _ lan) = Just lan
 languageValue _ = Nothing 
 
 -- | Get the datatype value for a 'BindingValue'. Return 'Nothing' if 'BindingValue' is not 'TypedLiteral'.
 datatypeValue :: BindingValue -> Maybe String
-datatypeValue (TypedLiteral str tp) = Just tp
+datatypeValue (TypedLiteral _ tp) = Just tp
 datatypeValue _ = Nothing
 
 -- | Get the 'URI' value for a BindingValue. Return 'Nothing' if 'BindingValue' is not 'URI'.
@@ -37,8 +37,8 @@ uriValue _ = Nothing
 -- | Get the literal value for a 'BindingValue'. Return 'Nothing' if not is of the any literal type.
 literalValue :: BindingValue -> Maybe String
 literalValue (Literal str) = Just str
-literalValue (TypedLiteral str tp) = Just str
-literalValue (LangLiteral str lan) = Just str
+literalValue (TypedLiteral str _) = Just str
+literalValue (LangLiteral str _) = Just str
 literalValue _ = Nothing
 
 -- | Get the 'BNode' value for a 'BindingValue'. Return 'Nothing' if 'BindingValue' is not 'BNode'.

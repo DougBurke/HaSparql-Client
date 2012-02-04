@@ -7,12 +7,12 @@ module Database.HaSparqlClient.Queries (runQuery, runSelectQuery, runAskQuery) w
 import Network.URI
 import Network.HTTP
 import Text.XML.Light
+import Text.XML.Light.Lexer (XmlSource)
 import Data.Maybe
 import Control.Monad (guard)
 import Data.Char (toLower)
 
 import Database.HaSparqlClient.Types
-import Database.HaSparqlClient.Values
 
 
 {- | Execute a service. On success returns a string created from the service. By default, the string is a representation in XML, other formats such as Turtle and N3 could be returned by adding the output format from the list of optional parameters. Returns an error message on failure. SPARUL and SPARQL can be performed.
@@ -65,22 +65,21 @@ getSparqlRequest f u m = case u of
                                                                 (2,_,_) -> do 
                                                                             let xml = rspBody rsp
                                                                             return $ f xml
-                                                                (a,b,c) -> do
-                                                                        let rspErr = rspBody rsp
-                                                                        return $ Left rspErr
+                                                                _ -> return $ Left $ rspBody rsp
+                                                                  
 
 -- This function looks if the Endpoint is a valid URI, then returns the URI and other parameters are fixed and added.                                            
 constructURI :: Service -> Either String (URI,[ExtraParameters])                                            
-constructURI (Sparql endpoint query defg ng oth) = case parseURI endpoint of
+constructURI (Sparql epoint qry defg ng oth) = case parseURI epoint of
                                                     Nothing -> Left "Bad string for endpoint."
-                                                    Just uri -> Right (uri,[("query",query)] ++ defaultgraph defg++ othervars ng ++ filtparams oth)
+                                                    Just uri -> Right (uri,[("query",qry)] ++ dgraph ++ othervars ng ++ filtparams oth)
   where
    othervars lst = [("named-graph-uri",x)|x<-lst]
-   defaultgraph dg = case dg of
-                        Nothing -> []
-                        Just g -> [("default-graph-uri", g)]
+   dgraph = case defg of
+     Nothing -> []
+     Just g -> [("default-graph-uri", g)]
    filtparams = filter bool
-   bool (a,b)
+   bool (a,_)
             |lower a /= "named-graph-uri" && lower a /= "default-graph-uri" = True
             |otherwise = False
    lower = map toLower
@@ -103,17 +102,18 @@ parseSparqlResults vars = map (parseSparqlBindings vars) . findElements (QName "
 parseSparqlBindings :: [String] -> Element -> [BindingValue]
 parseSparqlBindings vars doc = map pVar vars
   where
-   pVar v  = maybe Unbound (elementBinding . head . elChildren) $ filterElement (pred v) doc
-   pred v e = isJust $ do 
-                        a <- findAttr (unqual "name") e
-                        guard $ a == v
+   pVar v  = maybe Unbound (elementBinding . head . elChildren) $ filterElement (predV v) doc
+   predV v e = isJust $ do 
+     a <- findAttr (unqual "name") e
+     guard $ a == v
                         
 -- Parse the XML document and returns the Boolean value as Maybe Bool 
 parseSparqlBooleanResult  :: Element -> Maybe Bool
 parseSparqlBooleanResult doc =  case (findElement (QName "boolean" quri Nothing) doc) of
-                                    Just elem -> case (strContent elem) of
-                                                    "true" -> Just True
-                                                    "false" -> Just False
+                                    Just e -> case (strContent e) of
+                                      "true" -> Just True
+                                      "false" -> Just False
+                                      _ -> Nothing
                                     _ -> Nothing
 
 -- Transform an XML element in a BindingValue.                                                          
@@ -134,11 +134,17 @@ getRespBody :: (URI,[ExtraParameters]) -> Method -> IO (Either IOError (Response
 getRespBody u m = catch (simpleHTTP(mountRequest m u) >>= (\(Right rsp) -> return (Right rsp))) (return . Left )
 
 -- Make an HTTP GET or POST, according to the SPARQL protocol, some endpoints do not yet support POST requests. Some SPARQL queries, perhaps machine generated, may be longer than can be reliably conveyed by way of the HTTP GET. In those cases the POST may be used.
+mountRequest :: 
+  Method
+  -> (URI, [(String, String)])
+  -> Request String
 mountRequest m (uri,params) = case m of
                 HPOST -> (Request uri POST [mkHeader HdrContentType "application/x-www-form-urlencoded", mkHeader HdrAccept accept, mkHeader HdrContentLength (show $ length $ urlEncodeVars params), mkHeader HdrUserAgent "hasparql-client-0.1"] (urlEncodeVars params))
                 _ -> insertHeaders [mkHeader HdrAccept accept] (getRequest $ show uri ++ "?" ++ urlEncodeVars params)
 
+
 -- Parse XML documents depending on the generic function in the argument.                 
+parse :: (XmlSource s) => (Element -> a) -> s -> Either String a                 
 parse f s = case parseXMLDoc s of
                 Just doc -> Right (f doc)
                 Nothing -> Left "Internal error parsing xml results."
@@ -147,4 +153,5 @@ right :: b -> Either a b
 right = Right
 
 -- Defaults MIME/Types for SPARQL queries. '*/*' for all other possibilities.
+accept :: String
 accept = "application/sparql-results+xml, application/rdf+xml, */*"
