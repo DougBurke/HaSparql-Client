@@ -32,10 +32,12 @@ Cabal-version: >= 1.6
 Library
   Build-depends: 
     base >= 4 && < 5,
+    bytestring == 0.9.*,
     HTTP >= 4,
+    http-conduit == 1.2.*,
     mtl == 2.0.*,
-    xml,
-    network
+    network,
+    xml
 
   Exposed-modules:
     Database.HaSparqlClient

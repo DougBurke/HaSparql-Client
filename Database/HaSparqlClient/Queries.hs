@@ -2,27 +2,45 @@
      'runSelectQuery' and 'runAskQuery' may not work if you try to override the output format. See also about 'HGET' and 'HPOST'.
 -}
 
-module Database.HaSparqlClient.Queries (runQuery, runSelectQuery, runAskQuery) where
+module Database.HaSparqlClient.Queries 
+       (
+         runQuery
+       , runSelectQuery
+       , runAskQuery
+       ) where
+
+-- import qualified Data.ByteString.Lazy as L
+import qualified Data.ByteString.Lazy.Char8 as L
+import Control.Exception as CE
 
 import Network.URI
-import Network.HTTP
+import Network.HTTP.Conduit
+import Network.HTTP (urlEncodeVars)
+
 import Text.XML.Light
 import Text.XML.Light.Lexer (XmlSource)
 import Data.Maybe
-import Control.Monad (guard)
+import Control.Monad (guard, liftM)
 import Data.Char (toLower)
 
 import Database.HaSparqlClient.Types
 
+{- | Execute a service.
 
-{- | Execute a service. On success returns a string created from the service. By default, the string is a representation in XML, other formats such as Turtle and N3 could be returned by adding the output format from the list of optional parameters. Returns an error message on failure. SPARUL and SPARQL can be performed.
+On success returns a string created from the service.
+By default, the string is a representation in XML, other formats such as Turtle and N3 
+could be returned by adding the output format from the list of optional parameters.
+
+Returns an error message on failure. SPARUL and SPARQL can be performed.
 -}
-runQuery :: Service -> Method -> IO(Either String String)
-runQuery = getSparqlRequest right . constructURI 
+runQuery :: Service -> Method -> IO (Either String String)
+runQuery = getSparqlRequest (right . L.unpack) . constructURI 
 
-{- | Find all possible values for a query of type SELECT and may return several lists of 'BindingValue'. URI, Literal and Blank Nodes are now types in Haskell. If it fails returns an error message. -}
-runSelectQuery :: Service ->  Method -> IO(Either String [[BindingValue]])
+-- | Find all possible values for a query of type @SELECT@, returning the bound variables.
+--   If it fails returns an error message.
+runSelectQuery :: Service ->  Method -> IO (Either String [[BindingValue]])
 runSelectQuery =  getSparqlRequest (parse $ parseSparqlVariables >>= parseSparqlResults) . constructURI
+
 -- @
 --  select = do
 --     res <- runSelectQuery defaultService HPOST
@@ -30,16 +48,19 @@ runSelectQuery =  getSparqlRequest (parse $ parseSparqlVariables >>= parseSparql
 --       Left e -> print $ "Error:" ++ e
 --       Right s -> print s
 -- @
--- | Return Right True or Right False for a query of type ASK. If it fails returns an error message.
-runAskQuery :: Service -> Method -> IO(Either String Bool)
+
+-- | Return Right True or Right False for a query of type @ASK@. 
+--   If it fails returns an error message.
+runAskQuery :: Service -> Method -> IO (Either String Bool)
 runAskQuery serv m= do 
-                                    b <- getSparqlRequest (parse parseSparqlBooleanResult) (constructURI serv) m
-                                    case b of
-                                        Right x -> case x of
-                                                    Just True -> return $ Right True
-                                                    Just False -> return $ Right False
-                                                    _ -> return $ Left "Boolean binding not found."
-                                        Left x -> return $ Left x
+  b <- getSparqlRequest (parse parseSparqlBooleanResult) (constructURI serv) m
+  case b of
+    Right x -> case x of
+      Just True -> return $ Right True
+      Just False -> return $ Right False
+      _ -> return $ Left "Boolean binding not found."
+    Left x -> return $ Left x
+
 -- @
 --  ask = do
 --     let s = Sparql "http://dbpedia.org/sparql/" query Nothing [] []
@@ -53,20 +74,42 @@ runAskQuery serv m= do
 --       Left e -> print $ "Error:" ++ e
 --       Right s -> print s
 -- @
+
 -- In case of success makes the request and transforms the result depending on the callback function.
-getSparqlRequest :: (String -> Either String b) -> Either String (URI,[ExtraParameters]) -> Method -> IO (Either String b)
-getSparqlRequest f u m = case u of
-                            Left err -> return $ Left err
-                            Right uri -> do
-                                              resp <- getRespBody uri m
-                                              case resp of
-                                                Left err -> return $ Left (show err)
-                                                Right rsp -> case rspCode rsp of
-                                                                (2,_,_) -> do 
-                                                                            let xml = rspBody rsp
-                                                                            return $ f xml
-                                                                _ -> return $ Left $ rspBody rsp
+
+getSparqlRequest :: 
+  (L.ByteString -> Either String b) 
+  -> Either String (URI, [ExtraParameters]) 
+  -> Method 
+  -> IO (Either String b)
+getSparqlRequest f u m = 
+  case u of
+    Left err -> return $ Left err
+    Right uri -> do
+      resp <- getRespBody uri m
+      case resp of
+        Left err -> return $ Left (show err)
+        Right rsp -> return $ f rsp
                                                                   
+
+{-
+getSparqlRequest :: 
+  (String -> Either String b) 
+  -> Either String (URI, [ExtraParameters]) 
+  -> Method 
+  -> IO (Either String b)
+getSparqlRequest f u m = 
+  case u of
+    Left err -> return $ Left err
+    Right uri -> do
+      resp <- getRespBody uri m
+      case resp of
+        Left err -> return $ Left (show err)
+        Right rsp -> case rspCode rsp of
+          (2,_,_) -> return $ f $ rspBody rsp
+          _       -> return $ Left $ rspBody rsp
+                                                                  
+-}
 
 -- This function looks if the Endpoint is a valid URI, then returns the URI and other parameters are fixed and added.                                            
 constructURI :: Service -> Either String (URI,[ExtraParameters])                                            
@@ -131,10 +174,34 @@ elementBinding e = case qName (elName e) of
   where
     langAttr = blank_name {qName = "lang", qPrefix = Just "xml"}
 
+{-
 getRespBody :: (URI,[ExtraParameters]) -> Method -> IO (Either IOError (Response String))
-getRespBody u m = catch (simpleHTTP(mountRequest m u) >>= (\(Right rsp) -> return (Right rsp))) (return . Left )
+getRespBody u m = catch (simpleHTTP (mountRequest m u) >>= (\(Right rsp) -> return (Right rsp))) (return . Left )
+-}
 
--- Make an HTTP GET or POST, according to the SPARQL protocol, some endpoints do not yet support POST requests. Some SPARQL queries, perhaps machine generated, may be longer than can be reliably conveyed by way of the HTTP GET. In those cases the POST may be used.
+{-
+NOTE: missing the header manipulation from the original, 
+network-based version.
+-}
+getRespBody ::
+  (URI, [ExtraParameters])
+  -> Method
+  -> IO (Either IOError L.ByteString)
+getRespBody _ HPOST = error "POST currently unsupported"
+getRespBody (u,es) HGET =  
+  let url = show u ++ "?" ++ urlEncodeVars es
+      act = simpleHttp url
+  in CE.catch (Right `liftM` act) (return . Left)
+
+{-
+Make an HTTP GET or POST, according to the SPARQL protocol, 
+some endpoints do not yet support POST requests. 
+Some SPARQL queries, perhaps machine generated, may be longer than 
+can be reliably conveyed by way of the HTTP GET. In those cases 
+POST may be used.
+-}
+
+{-
 mountRequest :: 
   Method
   -> (URI, [(String, String)])
@@ -147,6 +214,7 @@ mountRequest m (uri,params) =
                               , mkHeader HdrUserAgent "hasparql-client-0.1"] (urlEncodeVars params)
     HGET -> insertHeaders [mkHeader HdrAccept accept] (getRequest $ show uri ++ "?" ++ urlEncodeVars params)
 
+-}
 
 -- Parse XML documents depending on the generic function in the argument.                 
 parse :: (XmlSource s) => (Element -> a) -> s -> Either String a                 
