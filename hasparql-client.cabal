@@ -35,6 +35,7 @@ Library
     bytestring == 0.9.*,
     HTTP >= 4,
     http-conduit == 1.2.*,
+    http-types == 0.6.*,
     mtl == 2.0.*,
     network,
     xml
@@ -44,6 +45,9 @@ Library
     Database.HaSparqlClient.Types
     Database.HaSparqlClient.Values
     Database.HaSparqlClient.Queries
+
+  Other-modules:
+    Paths_hasparql_client
 
   ghc-options:
     -Wall

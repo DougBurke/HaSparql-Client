@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 {- | This module provides functions to access remote endpoints.
      'runSelectQuery' and 'runAskQuery' may not work if you try to override the output format. See also about 'HGET' and 'HPOST'.
 -}
@@ -10,11 +12,14 @@ module Database.HaSparqlClient.Queries
        ) where
 
 -- import qualified Data.ByteString.Lazy as L
-import qualified Data.ByteString.Lazy.Char8 as L
+import qualified Data.ByteString.Lazy.Char8 as L8
+import qualified Data.ByteString.Char8 as B8
+
 import Control.Exception as CE
 
 import Network.URI
 import Network.HTTP.Conduit
+import qualified Network.HTTP.Types as NT
 import Network.HTTP (urlEncodeVars)
 
 import Text.XML.Light
@@ -24,6 +29,8 @@ import Control.Monad (guard, liftM)
 import Data.Char (toLower)
 
 import Database.HaSparqlClient.Types
+import Paths_hasparql_client (version)
+import Data.Version (showVersion)
 
 {- | Execute a service.
 
@@ -34,7 +41,7 @@ could be returned by adding the output format from the list of optional paramete
 Returns an error message on failure. SPARUL and SPARQL can be performed.
 -}
 runQuery :: Service -> Method -> IO (Either String String)
-runQuery = getSparqlRequest (right . L.unpack) . constructURI 
+runQuery = getSparqlRequest (right . L8.unpack) . constructURI 
 
 -- | Find all possible values for a query of type @SELECT@, returning the bound variables.
 --   If it fails returns an error message.
@@ -78,7 +85,7 @@ runAskQuery serv m= do
 -- In case of success makes the request and transforms the result depending on the callback function.
 
 getSparqlRequest :: 
-  (L.ByteString -> Either String b) 
+  (L8.ByteString -> Either String b) 
   -> Either String (URI, [ExtraParameters]) 
   -> Method 
   -> IO (Either String b)
@@ -112,30 +119,31 @@ getSparqlRequest f u m =
 -}
 
 -- This function looks if the Endpoint is a valid URI, then returns the URI and other parameters are fixed and added.                                            
-constructURI :: Service -> Either String (URI,[ExtraParameters])                                            
-constructURI (Sparql epoint qry defg ng oth) = case parseURI epoint of
-                                                    Nothing -> Left "Bad string for endpoint."
-                                                    Just uri -> Right (uri,[("query",qry)] ++ dgraph ++ othervars ng ++ filtparams oth)
-  where
-   othervars lst = [("named-graph-uri",x)|x<-lst]
-   dgraph = case defg of
-     Nothing -> []
-     Just g -> [("default-graph-uri", g)]
-   filtparams = filter bool
-   bool (a,_)
-            |lower a /= "named-graph-uri" && lower a /= "default-graph-uri" = True
-            |otherwise = False
-   lower = map toLower
+constructURI :: Service -> Either String (URI, [ExtraParameters])                                            
+constructURI (Sparql epoint qry defg ng oth) = 
+  case parseURI epoint of
+    Nothing -> Left "Bad string for endpoint."
+    Just uri -> Right (uri, [("query",qry)] ++ dgraph ++ othervars ng ++ filtparams oth)
+    where
+      othervars lst = [("named-graph-uri", x) | x<-lst]
+      dgraph = case defg of
+        Nothing -> []
+        Just g -> [("default-graph-uri", g)]
+      filtparams = filter bool
+      bool (a,_)
+        | lower a /= "named-graph-uri" && lower a /= "default-graph-uri" = True
+        | otherwise = False
+      lower = map toLower
          
 quri :: Maybe String
 quri = Just "http://www.w3.org/2005/sparql-results#"
 
 -- Find the names for all sparql variables in the XML document.
 parseSparqlVariables :: Element -> [String]    
-parseSparqlVariables doc = mapMaybe attr (findElements (QName "variable" quri Nothing) doc)
-
-  where
-   attr = findAttr (QName "name" Nothing Nothing)
+parseSparqlVariables doc = 
+  mapMaybe attr (findElements (QName "variable" quri Nothing) doc)
+    where
+      attr = findAttr (QName "name" Nothing Nothing)
 
 -- Transform the XmlElement recivied from HTTP request with variable's name in lists.
 parseSparqlResults :: [String] -> Element -> [[BindingValue]]
@@ -174,47 +182,36 @@ elementBinding e = case qName (elName e) of
   where
     langAttr = blank_name {qName = "lang", qPrefix = Just "xml"}
 
-{-
-getRespBody :: (URI,[ExtraParameters]) -> Method -> IO (Either IOError (Response String))
-getRespBody u m = catch (simpleHTTP (mountRequest m u) >>= (\(Right rsp) -> return (Right rsp))) (return . Left )
--}
-
-{-
-NOTE: missing the header manipulation from the original, 
-network-based version.
--}
 getRespBody ::
   (URI, [ExtraParameters])
   -> Method
-  -> IO (Either IOError L.ByteString)
-getRespBody _ HPOST = error "POST currently unsupported"
-getRespBody (u,es) HGET =  
-  let url = show u ++ "?" ++ urlEncodeVars es
-      act = simpleHttp url
-  in CE.catch (Right `liftM` act) (return . Left)
+  -> IO (Either IOError L8.ByteString)
+getRespBody u m = CE.catch (Right `liftM` makeCall u m) (return . Left)
 
-{-
-Make an HTTP GET or POST, according to the SPARQL protocol, 
-some endpoints do not yet support POST requests. 
-Some SPARQL queries, perhaps machine generated, may be longer than 
-can be reliably conveyed by way of the HTTP GET. In those cases 
-POST may be used.
--}
-
-{-
-mountRequest :: 
-  Method
-  -> (URI, [(String, String)])
-  -> Request String
-mountRequest m (uri,params) = 
-  case m of
-    HPOST -> Request uri POST [ mkHeader HdrContentType "application/x-www-form-urlencoded"
-                              , mkHeader HdrAccept accept
-                              , mkHeader HdrContentLength (show $ length $ urlEncodeVars params)
-                              , mkHeader HdrUserAgent "hasparql-client-0.1"] (urlEncodeVars params)
-    HGET -> insertHeaders [mkHeader HdrAccept accept] (getRequest $ show uri ++ "?" ++ urlEncodeVars params)
-
--}
+makeCall ::
+  (URI, [ExtraParameters])
+  -> Method
+  -> IO L8.ByteString
+makeCall (uri, params) m = do
+  u <- parseUrl $ show uri
+  let baseHdrs = [ NT.headerAccept accept
+                 , ("UserAgent", B8.pack (showVersion version))]
+                 ++ requestHeaders u
+                 
+      qs = B8.pack $ urlEncodeVars params
+      
+      u' = case m of
+        HGET -> u { method = "GET"
+                  , requestHeaders = baseHdrs
+                  , queryString = qs
+                  }
+                
+        HPOST -> u { method = "POST"
+                   , requestHeaders = ("Content-Type", "application/x-www-form-urlencoded") : baseHdrs
+                   , requestBody = RequestBodyBS qs
+                   }
+                 
+  withManager $ fmap responseBody . httpLbs u'
 
 -- Parse XML documents depending on the generic function in the argument.                 
 parse :: (XmlSource s) => (Element -> a) -> s -> Either String a                 
@@ -226,5 +223,5 @@ right :: b -> Either a b
 right = Right
 
 -- Defaults MIME/Types for SPARQL queries. '*/*' for all other possibilities.
-accept :: String
+accept :: NT.Ascii
 accept = "application/sparql-results+xml, application/rdf+xml, */*"
