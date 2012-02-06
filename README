@@ -1,0 +1,11 @@
+
+This is a fork of HaSparql-Client.
+
+## Changes
+
+# Version 0.1.1
+
+ - Internal update to the network code; use of http-conduit
+   provides significant speed improvements (on my one 
+   example case).
+
