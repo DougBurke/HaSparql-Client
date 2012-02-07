@@ -168,7 +168,7 @@ parseSparqlBooleanResult doc =
       _ -> Nothing
     _ -> Nothing
 
--- Transform an XML element in a BindingValue.                                                          
+-- Transform an XML element into a BindingValue.                                                          
 elementBinding :: Element -> BindingValue
 elementBinding e = case qName (elName e) of
                 "uri" -> Database.HaSparqlClient.Types.URI (strContent e)
@@ -196,7 +196,7 @@ makeCall (uri, params) m = do
   u <- parseUrl $ show uri
   let baseHdrs = [ NT.headerAccept accept
                  , ("Accept-Charset", "utf-8")
-                 , ("UserAgent", B8.pack (showVersion version))]
+                 , ("User-Agent", B8.pack (showVersion version))]
                  ++ requestHeaders u
                  
       qs = B8.pack $ urlEncodeVars params
@@ -208,7 +208,7 @@ makeCall (uri, params) m = do
                   }
                 
         HPOST -> u { method = "POST"
-                   , requestHeaders = ("Content-Type", "application/x-www-form-urlencoded") : baseHdrs
+                   , requestHeaders = NT.headerContentType "application/x-www-form-urlencoded" : baseHdrs
                    , requestBody = RequestBodyBS qs
                    }
                  
