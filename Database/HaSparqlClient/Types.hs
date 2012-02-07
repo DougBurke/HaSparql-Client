@@ -52,6 +52,10 @@ type Value = String
 -- | Set to HTTP GET or POST request, according to the SPARQL protocol, some endpoints do not yet support POST requests. Some SPARQL queries, perhaps machine generated, may be longer than can be reliably conveyed by way of the HTTP GET. In those cases the POST may be used.
 data Method = HGET | HPOST deriving (Eq, Show)
 
--- | Just a example.
+-- | An example query of DBPedia, using the <http://dbpedia.org/sparql> endpoint, where
+--   the query is
+--
+--   > select * where { ?s ?p ?o . } limit 10
+--
 defaultService :: Service
-defaultService = Sparql "http://dbpedia.org/sparql" "select ?s ?p ?o where {?s ?p ?o} limit 1" Nothing [] []
+defaultService = Sparql "http://dbpedia.org/sparql" "select * where {?s ?p ?o} limit 10" Nothing [] []
