@@ -21,6 +21,15 @@ Description:
     * Add internal conversion to RDFXML, N3, Turtle and JSON.
     .
     * Implement a parser to validate SPARQL queries.
+    .
+    Changes:
+    .
+    * Version 0.2.0: use of xml-conduit rather than xml;
+    move to using Text for strings.
+    .
+    * Version 0.1.1: use of http-conduit rather than network 
+    provides significant speed improvements (on my one 
+    example case).
 
 Stability:     experimental
 

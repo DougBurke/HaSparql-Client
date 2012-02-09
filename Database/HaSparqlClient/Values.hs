@@ -1,9 +1,19 @@
--- | This module provides some convenience functions to get values from BindingValue. 
-module Database.HaSparqlClient.Values(-- * Getting values
-                                    languageValue, datatypeValue, uriValue, literalValue, bnodeValue, value, 
-                                    -- * XML representation
-                                    showsparql) where
+-- | This module provides some convenience functions to get values from a `BindingValue`. 
 
+module Database.HaSparqlClient.Values (
+  -- * Getting values
+  languageValue
+  , datatypeValue
+  , uriValue
+  , literalValue
+  , bnodeValue
+  , value 
+    
+    -- * XML representation
+  , showsparql
+  ) where
+
+import qualified Data.Text as T
 import Database.HaSparqlClient.Types
 
 -- | SPARQL XML representation.
@@ -13,10 +23,10 @@ class ShowQuery a where
 -- | SPARQL XML representation for 'BindingValue'.
 instance ShowQuery BindingValue where
   showsparql (URI uri) = "<uri>" ++ uri ++ "</uri>"
-  showsparql (Literal str) = "<literal>"++ str ++ "</literal>"
-  showsparql (TypedLiteral str tp) = "<literal datatype=\"" ++ tp ++ "\">" ++ str ++ "</literal>"
+  showsparql (Literal str) = "<literal>" ++ T.unpack str ++ "</literal>"
+  showsparql (TypedLiteral str tp) = "<literal datatype=\"" ++ tp ++ "\">" ++ T.unpack str ++ "</literal>"
   showsparql (BNode str) = "<bnode>" ++ str ++ "</bnode>"
-  showsparql (LangLiteral str lan) = "<literal xml:lang=\"" ++ lan ++ "\">" ++ str ++ "</literal>"
+  showsparql (LangLiteral str lan) = "<literal xml:lang=\"" ++ lan ++ "\">" ++ T.unpack str ++ "</literal>"
   showsparql _ = ""
 
 -- | Get the language value for a 'BindingValue'. Return 'Nothing' if 'BindingValue' is not 'LangLiteral'.
@@ -35,7 +45,7 @@ uriValue (URI str) = Just str
 uriValue _ = Nothing
 
 -- | Get the literal value for a 'BindingValue'. Return 'Nothing' if not is of the any literal type.
-literalValue :: BindingValue -> Maybe String
+literalValue :: BindingValue -> Maybe T.Text
 literalValue (Literal str) = Just str
 literalValue (TypedLiteral str _) = Just str
 literalValue (LangLiteral str _) = Just str
@@ -53,5 +63,5 @@ value res = case uriValue res of
     Nothing -> case bnodeValue res of
       Nothing -> Nothing
       Just bno -> Just bno
-    Just lit -> Just lit
+    Just lit -> Just (T.unpack lit)
   Just uri -> Just uri

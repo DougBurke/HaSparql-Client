@@ -204,7 +204,7 @@ handleLiteral c =
           _ -> Literal
           
   in case child c >>= content of 
-    [x] -> [(f . T.unpack) x]
+    [x] -> [f x]
     _ -> []
 
 
