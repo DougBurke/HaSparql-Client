@@ -1,7 +1,17 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, TupleSections #-}
 
 {- | This module provides functions to access remote endpoints.
      'runSelectQuery' and 'runAskQuery' may not work if you try to override the output format. See also about 'HGET' and 'HPOST'.
+-}
+
+{-
+The SPARQL response XML format is described at
+
+http://www.w3.org/TR/rdf-sparql-XMLres/
+
+Note that there is no attempt at providing access to any
+additional metadata about the search results provided within
+the head element of the response.
 -}
 
 module Database.HaSparqlClient.Queries 
@@ -11,7 +21,7 @@ module Database.HaSparqlClient.Queries
        , runAskQuery
        ) where
 
--- import qualified Data.ByteString.Lazy as L
+import qualified Data.Text as T
 import qualified Data.ByteString.Lazy.Char8 as L8
 import qualified Data.ByteString.Char8 as B8
 
@@ -22,13 +32,17 @@ import Network.HTTP.Conduit
 import qualified Network.HTTP.Types as NT
 import Network.HTTP (urlEncodeVars)
 
-import Text.XML.Light
-import Text.XML.Light.Lexer (XmlSource)
+import Text.XML
+import Text.XML.Cursor
+
 import Data.Maybe
-import Control.Monad (guard, liftM)
 import Data.Char (toLower)
 
-import Database.HaSparqlClient.Types
+import Control.Applicative ((<|>), (<$>))
+import Control.Monad (liftM)
+
+import qualified Database.HaSparqlClient.Types as HT
+import Database.HaSparqlClient.Types hiding (URI)
 import Paths_hasparql_client (version)
 import Data.Version (showVersion)
 
@@ -41,12 +55,12 @@ could be returned by adding the output format from the list of optional paramete
 Returns an error message on failure. SPARUL and SPARQL can be performed.
 -}
 runQuery :: Service -> Method -> IO (Either String String)
-runQuery = getSparqlRequest (right . L8.unpack) . constructURI 
+runQuery = getSparqlRequest (Right . L8.unpack) . constructURI 
 
 -- | Find all possible values for a query of type @SELECT@, returning the bound variables.
 --   If it fails returns an error message.
 runSelectQuery :: Service ->  Method -> IO (Either String [[BindingValue]])
-runSelectQuery =  getSparqlRequest (parse $ parseSparqlVariables >>= parseSparqlResults) . constructURI
+runSelectQuery =  getSparqlRequest parseResultsDocument . constructURI
 
 -- @
 --  select = do
@@ -59,14 +73,8 @@ runSelectQuery =  getSparqlRequest (parse $ parseSparqlVariables >>= parseSparql
 -- | Return Right True or Right False for a query of type @ASK@. 
 --   If it fails returns an error message.
 runAskQuery :: Service -> Method -> IO (Either String Bool)
-runAskQuery serv m= do 
-  b <- getSparqlRequest (parse parseSparqlBooleanResult) (constructURI serv) m
-  case b of
-    Right x -> case x of
-      Just True -> return $ Right True
-      Just False -> return $ Right False
-      _ -> return $ Left "Boolean binding not found."
-    Left x -> return $ Left x
+runAskQuery serv = 
+  getSparqlRequest parseBooleanDocument (constructURI serv)
 
 -- @
 --  ask = do
@@ -99,25 +107,6 @@ getSparqlRequest f u m =
         Right rsp -> return $ f rsp
                                                                   
 
-{-
-getSparqlRequest :: 
-  (String -> Either String b) 
-  -> Either String (URI, [ExtraParameters]) 
-  -> Method 
-  -> IO (Either String b)
-getSparqlRequest f u m = 
-  case u of
-    Left err -> return $ Left err
-    Right uri -> do
-      resp <- getRespBody uri m
-      case resp of
-        Left err -> return $ Left (show err)
-        Right rsp -> case rspCode rsp of
-          (2,_,_) -> return $ f $ rspBody rsp
-          _       -> return $ Left $ rspBody rsp
-                                                                  
--}
-
 -- This function looks if the Endpoint is a valid URI, then returns the URI and other parameters are fixed and added.                                            
 constructURI :: Service -> Either String (URI, [ExtraParameters])                                            
 constructURI (Sparql epoint qry defg ng oth) = 
@@ -129,58 +118,95 @@ constructURI (Sparql epoint qry defg ng oth) =
       dgraph = case defg of
         Nothing -> []
         Just g -> [("default-graph-uri", g)]
-      filtparams = filter bool
-      bool (a,_)
+      filtparams = filter isBool
+      isBool (a,_)
         | lower a /= "named-graph-uri" && lower a /= "default-graph-uri" = True
         | otherwise = False
       lower = map toLower
          
-quri :: Maybe String
-quri = Just "http://www.w3.org/2005/sparql-results#"
+parseResultsDocument :: L8.ByteString -> Either String [[BindingValue]]
+parseResultsDocument d = case parseLBS def d of
+  Left se -> Left (show se)
+  Right doc -> 
+    let cursor = fromDocument doc
+        names = getVarNames cursor
+    in Right $ getVarResults names cursor
 
--- Find the names for all sparql variables in the XML document.
-parseSparqlVariables :: Element -> [String]    
-parseSparqlVariables doc = 
-  mapMaybe attr (findElements (QName "variable" quri Nothing) doc)
-    where
-      attr = findAttr (QName "name" Nothing Nothing)
+parseBooleanDocument :: L8.ByteString -> Either String Bool
+parseBooleanDocument d = case parseLBS def d of
+  Left se -> Left (show se)
+  Right doc -> 
+    let cursor = fromDocument doc
+        txt = child cursor >>= element "{http://www.w3.org/2005/sparql-results#}boolean" >>= child >>= content
+    in case txt of
+      ["true"] -> Right True
+      ["false"] -> Right False
+      _ -> Left $ "Invalid boolean response:\n" ++ L8.unpack d
 
--- Transform the XmlElement recivied from HTTP request with variable's name in lists.
-parseSparqlResults :: [String] -> Element -> [[BindingValue]]
-parseSparqlResults vars = map (parseSparqlBindings vars) . findElements (QName "result" quri Nothing)
+getVarNames :: Cursor -> [T.Text]
+getVarNames c = 
+  child c >>= element "{http://www.w3.org/2005/sparql-results#}head" >>=
+  child >>= element "{http://www.w3.org/2005/sparql-results#}variable" >>=
+  attribute "name"
+  
+-- The order of the elements within a result block are not necessarily in
+-- the same order as in the head/variable section, hence the need to
+-- potentially re-order the results (this also lets the code identify
+-- unbound variables).
+--
+-- This processing feels a bit ugly; I am probably not using the API
+-- properly. I plan to upgrade to the streaming API at a later date.
+--
+getVarResults :: [T.Text] -> Cursor -> [[BindingValue]]
+getVarResults names c = 
+  let res = child c >>= element "{http://www.w3.org/2005/sparql-results#}results" >>= 
+            child >>= element "{http://www.w3.org/2005/sparql-results#}result" 
+      bs = map parseResult res
+  
+  in map (getVarResult names) bs
+  
+getVarResult :: [T.Text] -> [(T.Text, BindingValue)] -> [BindingValue]     
+getVarResult ns bs = map (fromMaybe Unbound . flip lookup bs) ns
 
-     
-parseSparqlBindings :: [String] -> Element -> [BindingValue]
-parseSparqlBindings vars doc = map pVar vars
-  where
-   pVar v  = maybe Unbound (elementBinding . head . elChildren) $ filterElement (predV v) doc
-   predV v e = isJust $ do 
-     a <- findAttr (unqual "name") e
-     guard $ a == v
-                        
--- Parse the XML document and returns the Boolean value as Maybe Bool 
-parseSparqlBooleanResult  :: Element -> Maybe Bool
-parseSparqlBooleanResult doc =
-  case findElement (QName "boolean" quri Nothing) doc of
-    Just e -> case strContent e of
-      "true" -> Just True
-      "false" -> Just False
-      _ -> Nothing
-    _ -> Nothing
+parseResult :: Cursor -> [(T.Text, BindingValue)]
+parseResult c = 
+  child c >>= element "{http://www.w3.org/2005/sparql-results#}binding" >>= getBinding
 
--- Transform an XML element into a BindingValue.                                                          
-elementBinding :: Element -> BindingValue
-elementBinding e = case qName (elName e) of
-                "uri" -> Database.HaSparqlClient.Types.URI (strContent e)
-                "literal" -> case findAttr (unqual "datatype") e of
-                                    Just dt -> TypedLiteral (strContent e) dt
-                                    Nothing -> case findAttr langAttr e of
-                                        Just lang -> LangLiteral (strContent e) lang
-                                        Nothing  -> Literal (strContent e)
-                "bnode" -> BNode (strContent e)
-                _ -> Unbound
-  where
-    langAttr = blank_name {qName = "lang", qPrefix = Just "xml"}
+getBinding :: Cursor -> [(T.Text, BindingValue)]
+getBinding c = 
+  let name = head $ attribute "name" c
+      bv c' = getBNodeBinding c' 
+              <|> getURIBinding c'
+              <|> getLiteralBinding c'
+  in (name,) <$> (child c >>= bv)
+
+getBindingValue :: Name -> (T.Text -> BindingValue) -> Cursor -> [BindingValue]
+getBindingValue n f c =
+  let vals = element n c >>= child >>= content
+  in case vals of
+    [x] -> [f x]
+    _ -> []
+  
+getBNodeBinding, getURIBinding, getLiteralBinding :: Cursor -> [BindingValue]
+getBNodeBinding = getBindingValue "{http://www.w3.org/2005/sparql-results#}bnode" (BNode . T.unpack)
+getURIBinding   = getBindingValue "{http://www.w3.org/2005/sparql-results#}uri"   (HT.URI . T.unpack)
+
+getLiteralBinding c = element "{http://www.w3.org/2005/sparql-results#}literal" c >>= handleLiteral
+
+handleLiteral :: Cursor -> [BindingValue]
+handleLiteral c = 
+  let dt = attribute "datatype" c
+      ln = attribute "{http://www.w3.org/XML/1998/namespace}lang" c
+      f = case dt of
+        [dtype] -> flip TypedLiteral (T.unpack dtype)
+        _ -> case ln of
+          [lang] -> flip LangLiteral (T.unpack lang)
+          _ -> Literal
+          
+  in case child c >>= content of 
+    [x] -> [(f . T.unpack) x]
+    _ -> []
+
 
 getRespBody ::
   (URI, [ExtraParameters])
@@ -213,15 +239,6 @@ makeCall (uri, params) m = do
                    }
                  
   withManager $ fmap responseBody . httpLbs u'
-
--- Parse XML documents depending on the generic function in the argument.                 
-parse :: (XmlSource s) => (Element -> a) -> s -> Either String a                 
-parse f s = case parseXMLDoc s of
-                Just doc -> Right (f doc)
-                Nothing -> Left "Internal error parsing xml results."
-
-right :: b -> Either a b
-right = Right
 
 -- Defaults MIME/Types for SPARQL queries. '*/*' for all other possibilities.
 accept :: NT.Ascii
