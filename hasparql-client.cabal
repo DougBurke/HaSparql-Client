@@ -25,7 +25,11 @@ Description:
     Changes:
     .
     * Version 0.2.0: use of xml-conduit rather than xml;
-    move to using Text for strings.
+    move to using @Text@ for strings in @BindingValue@;
+    added the @ToSPARQL@ type class to support the use of an
+    EDSL for query generation (unfortunately it has the wrong
+    kind so you can't use it with the monadic version from
+    hsparql, so will probably remove it pdq).
     .
     * Version 0.1.1: use of http-conduit rather than network 
     provides significant speed improvements (on my one 

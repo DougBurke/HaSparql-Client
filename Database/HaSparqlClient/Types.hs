@@ -1,17 +1,54 @@
+{-# LANGUAGE TypeSynonymInstances #-}
+
 -- | Type definitions.
-module Database.HaSparqlClient.Types (-- * SELECT binding value
-    BindingValue(..), 
-    -- * SPARQL service
-    Service(..), 
+
+module Database.HaSparqlClient.Types (
+  -- * SELECT binding value
+  BindingValue(..) 
+  
+  -- * SPARQL service
+  , Service(..)
+  , ToSPARQL(..)
+    
     -- ** Required elements
-    Endpoint, Query, 
+  , Endpoint
+  , Query 
+    
     -- ** Optional elements
-    DefaultGraph, NamedGraph, ExtraParameters, Key, Value, 
+  , DefaultGraph
+  , NamedGraph
+  , ExtraParameters
+  , Key
+  , Value 
+    
     -- * Request method
-    Method(..),
-    defaultService) where
+  , Method(..)
+  , defaultService
+    
+  ) where
 
 import qualified Data.Text as T
+
+-- | Construct a SPARQL query string.
+--
+--   The intent is to support a type-safe version as provided
+--   by the hsparql package as well as basic string values
+--   for flexibility (e.g. to use features that may not be
+--   supported by the Query EDSL or when you are provided a
+--   query by an external agent). Unfortunately it has the
+--   wrong kind to support the monadic Query from
+--   the hsparql package, so it will probably be a very
+--   short-lived experiment.
+--
+class ToSPARQL a where
+  toSPARQL :: a -> Query
+
+instance ToSPARQL String where
+  toSPARQL = id
+
+instance ToSPARQL T.Text where
+  toSPARQL = T.unpack
+
 
 -- | Representation for SELECT query result format.
 data BindingValue = 
@@ -24,11 +61,11 @@ data BindingValue =
   deriving (Eq, Show) 
 
 -- | Local representation for a SPARQL service.
-data Service = 
+data Service a = 
   Sparql
   { 
     endpoint :: Endpoint -- ^ The URI of the SPARQL end point.
-  , query :: Query -- ^ The query.
+  , query :: a -- ^ The query, which should be an instance of 'ToSPARQL'.
   , defaultgraph :: DefaultGraph -- ^ Override the default graph in the SPARQL query.
   , namedgraph :: [NamedGraph] -- ^ Override named graphs from SPARQL queries.
   , optionalparameters :: [ExtraParameters]
@@ -62,5 +99,5 @@ data Method = HGET | HPOST deriving (Eq, Show)
 --
 --   > select * where { ?s ?p ?o . } limit 10
 --
-defaultService :: Service
+defaultService :: Service String
 defaultService = Sparql "http://dbpedia.org/sparql" "select * where {?s ?p ?o} limit 10" Nothing [] []

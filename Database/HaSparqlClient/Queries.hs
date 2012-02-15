@@ -54,41 +54,44 @@ could be returned by adding the output format from the list of optional paramete
 
 Returns an error message on failure. SPARUL and SPARQL can be performed.
 -}
-runQuery :: Service -> Method -> IO (Either String String)
+runQuery :: ToSPARQL a => Service a -> Method -> IO (Either String String)
 runQuery = getSparqlRequest (Right . L8.unpack) . constructURI 
 
 -- | Find all possible values for a query of type @SELECT@, returning the bound variables.
 --   If it fails returns an error message.
-runSelectQuery :: Service ->  Method -> IO (Either String [[BindingValue]])
-runSelectQuery =  getSparqlRequest parseResultsDocument . constructURI
+--
+--   An example:
+--
+-- > select = do
+-- >    res <- runSelectQuery defaultService HPOST
+-- >    case res of
+-- >      Left e -> print $ "Error:" ++ e
+-- >      Right s -> print s
 
--- @
---  select = do
---     res <- runSelectQuery defaultService HPOST
---     case res of
---       Left e -> print $ "Error:" ++ e
---       Right s -> print s
--- @
+runSelectQuery :: ToSPARQL a => Service a ->  Method -> IO (Either String [[BindingValue]])
+runSelectQuery =  getSparqlRequest parseResultsDocument . constructURI
 
 -- | Return Right True or Right False for a query of type @ASK@. 
 --   If it fails returns an error message.
-runAskQuery :: Service -> Method -> IO (Either String Bool)
+--
+--   An example:
+--
+-- > ask = do
+-- >    let s = Sparql "http://dbpedia.org/sparql/" query Nothing [] []
+-- >    res <- runAskQuery s HGET
+-- >      where
+-- >        query = "PREFIX prop: <http://dbpedia.org/property/>" ++
+-- >         " ASK { <http://dbpedia.org/resource/Amazon_River> prop:length ?amazon ." ++
+-- >         " <http://dbpedia.org/resource/Nile> prop:length ?nile ." ++
+-- >         "FILTER(?amazon > ?nile) .} "
+-- >    case res of
+-- >      Left e -> print $ "Error:" ++ e
+-- >      Right s -> print s
+
+runAskQuery :: ToSPARQL a => Service a -> Method -> IO (Either String Bool)
 runAskQuery serv = 
   getSparqlRequest parseBooleanDocument (constructURI serv)
 
--- @
---  ask = do
---     let s = Sparql "http://dbpedia.org/sparql/" query Nothing [] []
---     res <- runAskQuery s HGET
---       where
---         query = "PREFIX prop: <http://dbpedia.org/property/>" ++
---          " ASK { <http://dbpedia.org/resource/Amazon_River> prop:length ?amazon ." ++
---          " <http://dbpedia.org/resource/Nile> prop:length ?nile ." ++
---          "FILTER(?amazon > ?nile) .} "
---     case res of
---       Left e -> print $ "Error:" ++ e
---       Right s -> print s
--- @
 
 -- In case of success makes the request and transforms the result depending on the callback function.
 
@@ -107,12 +110,13 @@ getSparqlRequest f u m =
         Right rsp -> return $ f rsp
                                                                   
 
--- This function looks if the Endpoint is a valid URI, then returns the URI and other parameters are fixed and added.                                            
-constructURI :: Service -> Either String (URI, [ExtraParameters])                                            
+-- This function looks if the Endpoint is a valid URI,
+-- then returns the URI and other parameters are fixed and added.                                            
+constructURI :: ToSPARQL a => Service a -> Either String (URI, [ExtraParameters])                                            
 constructURI (Sparql epoint qry defg ng oth) = 
   case parseURI epoint of
     Nothing -> Left "Bad string for endpoint."
-    Just uri -> Right (uri, [("query",qry)] ++ dgraph ++ othervars ng ++ filtparams oth)
+    Just uri -> Right (uri, ("query", toSPARQL qry) : dgraph ++ othervars ng ++ filtparams oth)
     where
       othervars lst = [("named-graph-uri", x) | x<-lst]
       dgraph = case defg of
