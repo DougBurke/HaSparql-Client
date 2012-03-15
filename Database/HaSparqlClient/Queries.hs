@@ -223,7 +223,21 @@ makeCall ::
   -> Method
   -> IO L8.ByteString
 makeCall (uri, params) m = do
-  u <- parseUrl $ show uri
+  -- strip out any basic authentication since parseUrl does not handle this
+  let (uri', basicAuth) = case uriAuthority uri of
+        Nothing -> (uri, "")
+        Just ua -> case uriUserInfo ua of
+          "" -> (uri, "")
+          x -> (uri { uriAuthority = Just (ua { uriUserInfo = ""}) }, x)
+        
+      (uname, upass1) = break (==':') basicAuth
+      upass = case upass1 of
+        "" -> ""
+        ':':xs -> xs
+        ys -> error $ "Unexpected password value of " ++ ys ++ " in URI: " ++ show uri
+        
+  u <- parseUrl $ show uri'
+  
   let baseHdrs = [ NT.headerAccept accept
                  , ("Accept-Charset", "utf-8")
                  , ("User-Agent", B8.pack (showVersion version))]
@@ -242,7 +256,11 @@ makeCall (uri, params) m = do
                    , requestBody = RequestBodyBS qs
                    }
                  
-  withManager $ fmap responseBody . httpLbs u'
+      u'' = if null uname
+            then u'
+            else applyBasicAuth (B8.pack uname) (B8.pack upass) u'
+  
+  withManager $ fmap responseBody . httpLbs u''
 
 -- Defaults MIME/Types for SPARQL queries. '*/*' for all other possibilities.
 accept :: NT.Ascii

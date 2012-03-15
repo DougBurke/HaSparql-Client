@@ -1,5 +1,5 @@
 Name:           hasparql-client
-Version:        0.2.0
+Version:        0.2.1
 License:        BSD3
 License-file:   LICENSE
 Author:         Luiz Damascena <luizscence@gmail.com>
@@ -23,6 +23,9 @@ Description:
     * Implement a parser to validate SPARQL queries.
     .
     Changes:
+    .
+    * Version 0.2.1: support URIs which include HTTP Basic 
+    Authorization - e.g. @http://anonymous@localhost:5822/myDB@.
     .
     * Version 0.2.0: use of xml-conduit rather than xml;
     move to using @Text@ for strings in @BindingValue@;
