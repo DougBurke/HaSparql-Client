@@ -66,7 +66,7 @@ data Service a =
   { 
     endpoint :: Endpoint -- ^ The URI of the SPARQL end point.
   , query :: a -- ^ The query, which should be an instance of 'ToSPARQL'.
-  , defaultgraph :: DefaultGraph -- ^ Override the default graph in the SPARQL query.
+  , defaultgraph :: [DefaultGraph] -- ^ Override the default graph in the SPARQL query with the merge of these graphs
   , namedgraph :: [NamedGraph] -- ^ Override named graphs from SPARQL queries.
   , optionalparameters :: [ExtraParameters]
     -- ^ Some SPARQL endpoints require extra key value pairs. E.g., in Virtuoso Server, 
@@ -77,7 +77,7 @@ data Service a =
 
 type Endpoint = String
 type Query = String
-type DefaultGraph = Maybe String
+type DefaultGraph = String
 type NamedGraph = String
 type ExtraParameters = (Key, Value)
 
@@ -100,4 +100,4 @@ data Method = HGET | HPOST deriving (Eq, Show)
 --   > select * where { ?s ?p ?o . } limit 10
 --
 defaultService :: Service String
-defaultService = Sparql "http://dbpedia.org/sparql" "select * where {?s ?p ?o} limit 10" Nothing [] []
+defaultService = Sparql "http://dbpedia.org/sparql" "select * where {?s ?p ?o} limit 10" [] [] []

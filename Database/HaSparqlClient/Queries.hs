@@ -77,7 +77,7 @@ runSelectQuery =  getSparqlRequest parseResultsDocument . constructURI
 --   An example:
 --
 -- > ask = do
--- >    let s = Sparql "http://dbpedia.org/sparql/" query Nothing [] []
+-- >    let s = Sparql "http://dbpedia.org/sparql/" query [] [] []
 -- >    res <- runAskQuery s HGET
 -- >      where
 -- >        query = "PREFIX prop: <http://dbpedia.org/property/>" ++
@@ -113,20 +113,15 @@ getSparqlRequest f u m =
 -- This function looks if the Endpoint is a valid URI,
 -- then returns the URI and other parameters are fixed and added.                                            
 constructURI :: ToSPARQL a => Service a -> Either String (URI, [ExtraParameters])                                            
-constructURI (Sparql epoint qry defg ng oth) = 
+constructURI (Sparql epoint qry defgs ngs oth) = 
   case parseURI epoint of
     Nothing -> Left "Bad string for endpoint."
-    Just uri -> Right (uri, ("query", toSPARQL qry) : dgraph ++ othervars ng ++ filtparams oth)
+    Just uri -> Right (uri, ("query", toSPARQL qry) : dgraphs ++ ngraphs ++ filtparams oth)
     where
-      othervars lst = [("named-graph-uri", x) | x<-lst]
-      dgraph = case defg of
-        Nothing -> []
-        Just g -> [("default-graph-uri", g)]
-      filtparams = filter isBool
-      isBool (a,_)
-        | lower a /= "named-graph-uri" && lower a /= "default-graph-uri" = True
-        | otherwise = False
-      lower = map toLower
+      ngraphs = zip (repeat "named-graph-uri") ngs
+      dgraphs = zip (repeat "default-graph-uri") defgs
+      filtparams = filter keep
+      keep = (`notElem` ["named-graph-uri", "default-graph-uri"]) . map toLower . fst
          
 parseResultsDocument :: L8.ByteString -> Either String [[BindingValue]]
 parseResultsDocument d = case parseLBS def d of
