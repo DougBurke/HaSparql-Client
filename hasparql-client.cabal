@@ -26,7 +26,7 @@ Description:
     .
     * Version 0.3.0: Change the @defaultgraph@ field of
     @Service@ to accept a list of graphs rather than a single,
-    optional graph. 
+    optional graph. Removed the @ToSPARQL@ class.
     .
     * Version 0.2.1: support URIs which include HTTP Basic 
     Authorization - e.g. @http://anonymous@localhost:5822/myDB@.

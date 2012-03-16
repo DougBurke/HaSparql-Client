@@ -54,7 +54,7 @@ could be returned by adding the output format from the list of optional paramete
 
 Returns an error message on failure. SPARUL and SPARQL can be performed.
 -}
-runQuery :: ToSPARQL a => Service a -> Method -> IO (Either String String)
+runQuery :: Service -> Method -> IO (Either String String)
 runQuery = getSparqlRequest (Right . L8.unpack) . constructURI 
 
 -- | Find all possible values for a query of type @SELECT@, returning the bound variables.
@@ -68,7 +68,7 @@ runQuery = getSparqlRequest (Right . L8.unpack) . constructURI
 -- >      Left e -> print $ "Error:" ++ e
 -- >      Right s -> print s
 
-runSelectQuery :: ToSPARQL a => Service a ->  Method -> IO (Either String [[BindingValue]])
+runSelectQuery :: Service ->  Method -> IO (Either String [[BindingValue]])
 runSelectQuery =  getSparqlRequest parseResultsDocument . constructURI
 
 -- | Return Right True or Right False for a query of type @ASK@. 
@@ -88,7 +88,7 @@ runSelectQuery =  getSparqlRequest parseResultsDocument . constructURI
 -- >      Left e -> print $ "Error:" ++ e
 -- >      Right s -> print s
 
-runAskQuery :: ToSPARQL a => Service a -> Method -> IO (Either String Bool)
+runAskQuery :: Service -> Method -> IO (Either String Bool)
 runAskQuery serv = 
   getSparqlRequest parseBooleanDocument (constructURI serv)
 
@@ -103,8 +103,8 @@ getSparqlRequest ::
 getSparqlRequest f u m = 
   case u of
     Left err -> return $ Left err
-    Right uri -> do
-      resp <- getRespBody uri m
+    Right urivals -> do
+      resp <- getRespBody urivals m
       case resp of
         Left err -> return $ Left (show err)
         Right rsp -> return $ f rsp
@@ -112,11 +112,11 @@ getSparqlRequest f u m =
 
 -- This function looks if the Endpoint is a valid URI,
 -- then returns the URI and other parameters are fixed and added.                                            
-constructURI :: ToSPARQL a => Service a -> Either String (URI, [ExtraParameters])                                            
+constructURI :: Service -> Either String (URI, [ExtraParameters])                                            
 constructURI (Sparql epoint qry defgs ngs oth) = 
   case parseURI epoint of
     Nothing -> Left "Bad string for endpoint."
-    Just uri -> Right (uri, ("query", toSPARQL qry) : dgraphs ++ ngraphs ++ filtparams oth)
+    Just uri -> Right (uri, ("query", qry) : dgraphs ++ ngraphs ++ filtparams oth)
     where
       ngraphs = zip (repeat "named-graph-uri") ngs
       dgraphs = zip (repeat "default-graph-uri") defgs
