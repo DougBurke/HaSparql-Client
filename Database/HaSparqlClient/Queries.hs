@@ -4,6 +4,8 @@
      'runSelectQuery' and 'runAskQuery' may not work if you try to override the output format. See also about 'HGET' and 'HPOST'.
 -}
 
+TODO: need to find out what the encoding is and use it to convert to Text
+
 {-
 The SPARQL response XML format is described at
 
@@ -22,6 +24,8 @@ module Database.HaSparqlClient.Queries
        ) where
 
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
+
 import qualified Data.ByteString.Lazy.Char8 as L8
 import qualified Data.ByteString.Char8 as B8
 
@@ -49,13 +53,13 @@ import Data.Version (showVersion)
 {- | Execute a service.
 
 On success returns a string created from the service.
-By default, the string is a representation in XML, other formats such as Turtle and N3 
+By default, the output is a representation in XML, other formats such as Turtle and N3 
 could be returned by adding the output format from the list of optional parameters.
 
 Returns an error message on failure. SPARUL and SPARQL can be performed.
 -}
-runQuery :: Service -> Method -> IO (Either String String)
-runQuery = getSparqlRequest (Right . L8.unpack) . constructURI 
+runQuery :: Service -> Method -> IO (Either String T.Text)
+runQuery = getSparqlRequest (Right . T.decodeUtf8) . constructURI 
 
 -- | Find all possible values for a query of type @SELECT@, returning the bound variables.
 --   If it fails returns an error message.
@@ -187,8 +191,8 @@ getBindingValue n f c =
     _ -> []
   
 getBNodeBinding, getURIBinding, getLiteralBinding :: Cursor -> [BindingValue]
-getBNodeBinding = getBindingValue "{http://www.w3.org/2005/sparql-results#}bnode" (BNode . T.unpack)
-getURIBinding   = getBindingValue "{http://www.w3.org/2005/sparql-results#}uri"   (HT.URI . T.unpack)
+getBNodeBinding = getBindingValue "{http://www.w3.org/2005/sparql-results#}bnode" BNode
+getURIBinding   = getBindingValue "{http://www.w3.org/2005/sparql-results#}uri"   HT.URI
 
 getLiteralBinding c = element "{http://www.w3.org/2005/sparql-results#}literal" c >>= handleLiteral
 
@@ -197,9 +201,9 @@ handleLiteral c =
   let dt = attribute "datatype" c
       ln = attribute "{http://www.w3.org/XML/1998/namespace}lang" c
       f = case dt of
-        [dtype] -> flip TypedLiteral (T.unpack dtype)
+        [dtype] -> flip TypedLiteral dtype
         _ -> case ln of
-          [lang] -> flip LangLiteral (T.unpack lang)
+          [lang] -> flip LangLiteral lang
           _ -> Literal
           
   in case child c >>= content of 
@@ -233,9 +237,9 @@ makeCall (uri, params) m = do
         
   u <- parseUrl $ show uri'
   
-  let baseHdrs = [ NT.headerAccept accept
+  let baseHdrs = [ (NT.hAccept, accept)
                  , ("Accept-Charset", "utf-8")
-                 , ("User-Agent", B8.pack (showVersion version))]
+                 , (NT.hUserAgent, B8.pack (showVersion version))]
                  ++ requestHeaders u
                  
       qs = B8.pack $ urlEncodeVars params
@@ -247,7 +251,7 @@ makeCall (uri, params) m = do
                   }
                 
         HPOST -> u { method = "POST"
-                   , requestHeaders = NT.headerContentType "application/x-www-form-urlencoded" : baseHdrs
+                   , requestHeaders = (NT.hContentType, "application/x-www-form-urlencoded") : baseHdrs
                    , requestBody = RequestBodyBS qs
                    }
                  
@@ -258,5 +262,5 @@ makeCall (uri, params) m = do
   withManager $ fmap responseBody . httpLbs u''
 
 -- Defaults MIME/Types for SPARQL queries. '*/*' for all other possibilities.
-accept :: NT.Ascii
+accept :: B8.ByteString
 accept = "application/sparql-results+xml, application/rdf+xml, */*"

@@ -30,11 +30,11 @@ import qualified Data.Text as T
 
 -- | Representation for SELECT query result format.
 data BindingValue = 
-  URI String -- ^ URI reference to remote resource.
+  URI T.Text -- ^ URI reference to remote resource.
   | Literal T.Text -- ^ Literal string without datatype or lang.
-  | TypedLiteral T.Text String -- ^ Literal with datatype URI.
-  | LangLiteral  T.Text String -- ^ Literal with language.
-  | BNode String  -- ^ Blank Node with label.
+  | LangLiteral  T.Text T.Text -- ^ Literal with language.
+  | TypedLiteral T.Text T.Text -- ^ Literal with datatype URI.
+  | BNode T.Text  -- ^ Blank Node with label.
   | Unbound -- ^ Unbound result value.
   deriving (Eq, Show) 
 
