@@ -22,6 +22,8 @@ module Database.HaSparqlClient.Types (
     
     -- * Request method
   , Method(..)
+  , MIMEType
+  , mtTurtle, mtNTriples, mtRDFXML, mtTriG, mtTriX
   , defaultService
     
   ) where
@@ -71,6 +73,18 @@ type Value = String
 --   Some SPARQL queries, perhaps machine generated, may be longer than can be
 --   reliably conveyed by way of the HTTP GET. In those cases POST should be used.
 data Method = HGET | HPOST deriving (Eq, Show)
+
+-- | Represent the MIME type of a request.
+type MIMEType = String
+
+-- resurrecting the following from lost code; just guessing in places
+
+mtTurtle, mtNTriples, mtRDFXML, mtTriG, mtTriX :: MIMEType
+mtTurtle = "text/turtle"
+mtNTriples = "text/plain"
+mtRDFXML = "application/rdf+xml"
+mtTriG = "text/plain"
+mtTriX = "application/xml"
 
 -- | An example query of DBPedia, using the <http://dbpedia.org/sparql> endpoint, where
 --   the query is

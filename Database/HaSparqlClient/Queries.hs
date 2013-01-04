@@ -4,7 +4,7 @@
      'runSelectQuery' and 'runAskQuery' may not work if you try to override the output format. See also about 'HGET' and 'HPOST'.
 -}
 
-TODO: need to find out what the encoding is and use it to convert to Text
+-- TODO: need to find out what the encoding is and use it to convert to Text
 
 {-
 The SPARQL response XML format is described at
@@ -39,8 +39,9 @@ import Network.HTTP (urlEncodeVars)
 import Text.XML
 import Text.XML.Cursor
 
-import Data.Maybe
 import Data.Char (toLower)
+import Data.Maybe
+import Data.Monoid (mconcat)
 
 import Control.Applicative ((<|>), (<$>))
 import Control.Monad (liftM)
@@ -58,8 +59,10 @@ could be returned by adding the output format from the list of optional paramete
 
 Returns an error message on failure. SPARUL and SPARQL can be performed.
 -}
-runQuery :: Service -> Method -> IO (Either String T.Text)
-runQuery = getSparqlRequest (Right . T.decodeUtf8) . constructURI 
+runQuery :: Service -> Method -> [MIMEType] -> IO (Either String T.Text)
+runQuery srv = getSparqlRequest 
+               (Right . T.decodeUtf8 . mconcat . L8.toChunks)
+               (constructURI srv)
 
 -- | Find all possible values for a query of type @SELECT@, returning the bound variables.
 --   If it fails returns an error message.
@@ -73,7 +76,7 @@ runQuery = getSparqlRequest (Right . T.decodeUtf8) . constructURI
 -- >      Right s -> print s
 
 runSelectQuery :: Service ->  Method -> IO (Either String [[BindingValue]])
-runSelectQuery =  getSparqlRequest parseResultsDocument . constructURI
+runSelectQuery srv m = getSparqlRequest parseResultsDocument (constructURI srv) m []
 
 -- | Return Right True or Right False for a query of type @ASK@. 
 --   If it fails returns an error message.
@@ -93,8 +96,9 @@ runSelectQuery =  getSparqlRequest parseResultsDocument . constructURI
 -- >      Right s -> print s
 
 runAskQuery :: Service -> Method -> IO (Either String Bool)
-runAskQuery serv = 
-  getSparqlRequest parseBooleanDocument (constructURI serv)
+runAskQuery serv m = getSparqlRequest 
+                     parseBooleanDocument
+                     (constructURI serv) m []
 
 
 -- In case of success makes the request and transforms the result depending on the callback function.
@@ -102,9 +106,13 @@ runAskQuery serv =
 getSparqlRequest :: 
   (L8.ByteString -> Either String b) 
   -> Either String (URI, [ExtraParameters]) 
-  -> Method 
+  -> Method
+  -> [MIMEType] 
   -> IO (Either String b)
-getSparqlRequest f u m = 
+
+need to handle mime types
+
+getSparqlRequest f u m mts = 
   case u of
     Left err -> return $ Left err
     Right urivals -> do
@@ -113,6 +121,8 @@ getSparqlRequest f u m =
         Left err -> return $ Left (show err)
         Right rsp -> return $ f rsp
                                                                   
+
+Do we need to send in the mime type values into construct URI ???
 
 -- This function looks if the Endpoint is a valid URI,
 -- then returns the URI and other parameters are fixed and added.                                            
