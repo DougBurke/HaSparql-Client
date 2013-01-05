@@ -109,20 +109,17 @@ getSparqlRequest ::
   -> Method
   -> [MIMEType] 
   -> IO (Either String b)
-
-need to handle mime types
-
 getSparqlRequest f u m mts = 
   case u of
     Left err -> return $ Left err
     Right urivals -> do
-      resp <- getRespBody urivals m
+      resp <- getRespBody urivals m mts
       case resp of
         Left err -> return $ Left (show err)
         Right rsp -> return $ f rsp
                                                                   
 
-Do we need to send in the mime type values into construct URI ???
+-- QUS: Do we need to send in the mime type values into construct URI ???
 
 -- This function looks if the Endpoint is a valid URI,
 -- then returns the URI and other parameters are fixed and added.                                            
@@ -224,14 +221,16 @@ handleLiteral c =
 getRespBody ::
   (URI, [ExtraParameters])
   -> Method
+  -> [MIMEType]
   -> IO (Either IOError L8.ByteString)
-getRespBody u m = CE.catch (Right `liftM` makeCall u m) (return . Left)
+getRespBody u m mts = CE.catch (Right `liftM` makeCall u m mts) (return . Left)
 
 makeCall ::
   (URI, [ExtraParameters])
   -> Method
+  -> [MIMEType]
   -> IO L8.ByteString
-makeCall (uri, params) m = do
+makeCall (uri, params) m mts = do
   -- strip out any basic authentication since parseUrl does not handle this
   let (uri', basicAuth) = case uriAuthority uri of
         Nothing -> (uri, "")
@@ -247,7 +246,13 @@ makeCall (uri, params) m = do
         
   u <- parseUrl $ show uri'
   
-  let baseHdrs = [ (NT.hAccept, accept)
+  let acceptVals = -- should probably just use a single ByteString for default case
+          B8.intercalate ", " $ 
+            case mts of
+              [] -> [mtSPARQLResultsXML, mtRDFXML, mtAny]
+              _  -> mtSPARQLResultsXML : mts ++ [mtAny]
+
+      baseHdrs = [ (NT.hAccept, acceptVals)
                  , ("Accept-Charset", "utf-8")
                  , (NT.hUserAgent, B8.pack (showVersion version))]
                  ++ requestHeaders u
@@ -271,6 +276,3 @@ makeCall (uri, params) m = do
   
   withManager $ fmap responseBody . httpLbs u''
 
--- Defaults MIME/Types for SPARQL queries. '*/*' for all other possibilities.
-accept :: B8.ByteString
-accept = "application/sparql-results+xml, application/rdf+xml, */*"

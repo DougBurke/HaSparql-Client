@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 
 -- | Type definitions.
@@ -23,11 +24,13 @@ module Database.HaSparqlClient.Types (
     -- * Request method
   , Method(..)
   , MIMEType
+  , mtAny, mtSPARQLResultsXML
   , mtTurtle, mtNTriples, mtRDFXML, mtTriG, mtTriX
   , defaultService
     
   ) where
 
+import qualified Data.ByteString.Char8 as B8
 import qualified Data.Text as T
 
 -- | Representation for SELECT query result format.
@@ -75,11 +78,13 @@ type Value = String
 data Method = HGET | HPOST deriving (Eq, Show)
 
 -- | Represent the MIME type of a request.
-type MIMEType = String
+type MIMEType = B8.ByteString
 
 -- resurrecting the following from lost code; just guessing in places
 
-mtTurtle, mtNTriples, mtRDFXML, mtTriG, mtTriX :: MIMEType
+mtAny, mtSPARQLResultsXML, mtTurtle, mtNTriples, mtRDFXML, mtTriG, mtTriX :: MIMEType
+mtAny = "*/*"
+mtSPARQLResultsXML = "application/sparql-results+xml"
 mtTurtle = "text/turtle"
 mtNTriples = "text/plain"
 mtRDFXML = "application/rdf+xml"
