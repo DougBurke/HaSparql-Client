@@ -73,9 +73,9 @@ runQuery srv = getSparqlRequest
 -- >    res <- runSelectQuery defaultService HPOST
 -- >    case res of
 -- >      Left e -> print $ "Error:" ++ e
--- >      Right s -> print s
+-- >      Right (varnames,rows) -> print rows
 
-runSelectQuery :: Service ->  Method -> IO (Either String [[BindingValue]])
+runSelectQuery :: Service ->  Method -> IO (Either String ([T.Text], [[BindingValue]]))
 runSelectQuery srv m = getSparqlRequest parseResultsDocument (constructURI srv) m []
 
 -- | Return Right True or Right False for a query of type @ASK@. 
@@ -134,13 +134,14 @@ constructURI (Sparql epoint qry defgs ngs oth) =
       filtparams = filter keep
       keep = (`notElem` ["named-graph-uri", "default-graph-uri"]) . map toLower . fst
          
-parseResultsDocument :: L8.ByteString -> Either String [[BindingValue]]
+-- Return the names of the variables and then the per-row value sets.
+parseResultsDocument :: L8.ByteString -> Either String ([T.Text], [[BindingValue]])
 parseResultsDocument d = case parseLBS def d of
   Left se -> Left (show se)
   Right doc -> 
     let cursor = fromDocument doc
         names = getVarNames cursor
-    in Right $ getVarResults names cursor
+    in Right $ (names, getVarResults names cursor)
 
 parseBooleanDocument :: L8.ByteString -> Either String Bool
 parseBooleanDocument d = case parseLBS def d of

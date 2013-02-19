@@ -1,5 +1,5 @@
 Name:           hasparql-client
-Version:        0.3.1
+Version:        0.4
 License:        BSD3
 License-file:   LICENSE
 Author:         Luiz Damascena <luizscence@gmail.com>
@@ -23,6 +23,9 @@ Description:
     * Implement a parser to validate SPARQL queries.
     .
     Changes:
+    .
+    * Version 0.4: Changed the return of @runSelectQuery@ to include the
+    variable names.
     .
     * Version 0.3.1: Clean up of 0.3.0 code (disk crash may have lost
     some of these changes); allow return MIME type to be specified for
