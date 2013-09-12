@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings, TupleSections #-}
 
 {- | This module provides functions to access remote endpoints.
-     'runSelectQuery' and 'runAskQuery' may not work if you try to override the output format. See also about 'HGET' and 'HPOST'.
+
 -}
 
 -- TODO: need to find out what the encoding is and use it to convert to Text
@@ -14,7 +14,7 @@ http://www.w3.org/TR/rdf-sparql-XMLres/
 
 Note that there is no attempt at providing access to any
 additional metadata about the search results provided within
-the head element of the response.
+the head element of the response (the link tag).
 -}
 
 module Database.HaSparqlClient.Queries 
@@ -22,6 +22,9 @@ module Database.HaSparqlClient.Queries
          runQuery
        , runSelectQuery
        , runAskQuery
+         -- * Options
+       , QueryOptions
+       , queryTimeout
        ) where
 
 import Control.Exception as CE
@@ -43,6 +46,7 @@ import Control.Monad.Trans.Resource (MonadThrow, ResourceT)
 
 import Data.Char (toLower)
 import Data.Conduit (ConduitM, Sink, ($$+-), (=$=))
+import Data.Default (Default)
 import Data.Maybe (fromMaybe)
 import Data.Monoid (mconcat)
 
@@ -60,17 +64,43 @@ type ProcessResponseBody a =
   Sink B8.ByteString (ResourceT IO) a
   -- ConduitM B8.ByteString Void (ResourceT IO)
 
+-- | Options for the query. At present only contains the response timeout
+--   setting.
+data QueryOptions =
+  QueryOptions
+  { queryTimeout :: Maybe Int
+    -- ^ Number of microseconds before the query times out. The default
+    --   is 10 seconds. A value of @Nothing@ turns off the timeout.
+  }
 
+instance Show QueryOptions where
+  show x = unlines
+    [ "QueryOptions {"
+    , "  queryTimeout  = " ++ show (queryTimeout x)
+    , "}"
+    ]
+
+instance Default QueryOptions where
+  def = QueryOptions
+    { queryTimeout = Just (10 * 1000000)
+    }
+    
 {- | Execute a service.
 
 On success returns a string created from the service.
-By default, the output is a representation in XML, other formats such as Turtle and N3 
-could be returned by adding the output format from the list of optional parameters.
 
 Returns an error message on failure. SPARUL and SPARQL can be performed.
 -}
-runQuery :: Service -> Method -> [MIMEType] -> IO (Either String T.Text)
-runQuery srv = getSparqlRequest 
+runQuery ::
+  QueryOptions
+  -> Service
+  -> Method
+  -> [MIMEType]
+  -- ^ This set of mime types is added to the start of
+  --   @[mtSPARQLResultsXML, mtRDFXML, mtAny]@, and then used
+  --   in the @Accept@ field of the request.
+  -> IO (Either String T.Text)
+runQuery opt srv = getSparqlRequest opt
                ((T.decodeUtf8 . mconcat) `liftM` CL.consume)
                (constructURI srv)
 
@@ -80,49 +110,62 @@ runQuery srv = getSparqlRequest
 --   An example:
 --
 -- > select = do
--- >    res <- runSelectQuery defaultService HPOST
+-- >    let s = Sparql "http://dbpedia.org/sparql/" query [] [] []
+-- >        query = "SELECT ?p ?o { <http://dbpedia.org/resource/Amazon_River> ?p ?o . }"
+-- >    res <- runSelectQuery def s HPOST
 -- >    case res of
 -- >      Left e -> print $ "Error:" ++ e
 -- >      Right (varnames,rows) -> print rows
+runSelectQuery ::
+  QueryOptions
+  -> Service -- ^ There is no check that this request is a @SELECT@ query.
+  -> Method
+  -> IO (Either String ([T.Text], [[BindingValue]]))
+  -- ^ On success, returns the variables names (@[Text]@)
+  --   and the RDF terms bound to these variables (in the same
+  --   order), for each row. The list of results will be empty if
+  --   there was no match.
+runSelectQuery opt srv m = getSparqlRequest opt parseResultsDocument (constructURI srv) m []
 
-runSelectQuery :: Service ->  Method -> IO (Either String ([T.Text], [[BindingValue]]))
-runSelectQuery srv m = getSparqlRequest parseResultsDocument (constructURI srv) m []
-
--- | Return Right True or Right False for a query of type @ASK@. 
+-- | Return @Right True@ or @Right False@ for a query of type @ASK@. 
 --   If it fails returns an error message.
 --
 --   An example:
 --
 -- > ask = do
 -- >    let s = Sparql "http://dbpedia.org/sparql/" query [] [] []
--- >    res <- runAskQuery s HGET
--- >      where
 -- >        query = "PREFIX prop: <http://dbpedia.org/property/>" ++
 -- >         " ASK { <http://dbpedia.org/resource/Amazon_River> prop:length ?amazon ." ++
 -- >         " <http://dbpedia.org/resource/Nile> prop:length ?nile ." ++
 -- >         "FILTER(?amazon > ?nile) .} "
+-- >    res <- runAskQuery def s HGET
 -- >    case res of
 -- >      Left e -> print $ "Error:" ++ e
 -- >      Right s -> print s
 
-runAskQuery :: Service -> Method -> IO (Either String Bool)
-runAskQuery serv m = getSparqlRequest 
+runAskQuery ::
+  QueryOptions
+  -> Service -- ^ There is no check that this request is an @ASK@ query.
+  -> Method
+  -> IO (Either String Bool)
+runAskQuery opt serv m = getSparqlRequest opt
                      parseBooleanDocument
                      (constructURI serv) m []
 
 -- In case of success makes the request and transforms the result depending on the callback function.
 
 getSparqlRequest ::
-  ProcessResponseBody a
+  QueryOptions
+  -> ProcessResponseBody a
   -> Either String (URI, [ExtraParameters]) 
   -> Method
   -> [MIMEType] 
   -> IO (Either String a)
-getSparqlRequest stream u m mts = 
+getSparqlRequest opt stream u m mts = 
   case u of
     Left err -> return $ Left err
     Right urivals -> do
-      resp <- processResponse stream urivals m mts
+      resp <- processResponse opt stream urivals m mts
       case resp of
         Left err -> return $ Left (show err)
         Right r -> return $ Right r
@@ -332,12 +375,13 @@ handleLiteral c =
 -}
 
 makeCall ::
-  ProcessResponseBody a  -- ^ process the response body
+  QueryOptions
+  -> ProcessResponseBody a  -- ^ process the response body
   -> (URI, [ExtraParameters])
   -> Method
   -> [MIMEType]
   -> IO a
-makeCall stream (uri, params) m mts = do
+makeCall opt stream (uri, params) m mts = do
   -- strip out any basic authentication since parseUrl does not handle this
   let (uri', basicAuth) = case uriAuthority uri of
         Nothing -> (uri, "")
@@ -354,10 +398,12 @@ makeCall stream (uri, params) m mts = do
   u <- parseUrl $ show uri'
   
   let acceptVals = -- should probably just use a single ByteString for default case
-          B8.intercalate ", " $ 
+          B8.intercalate ", " $ mts ++ [mtSPARQLResultsXML, mtRDFXML, mtAny]
+          {- OLD CODE: not sure why I chose this
             case mts of
               [] -> [mtSPARQLResultsXML, mtRDFXML, mtAny]
               _  -> mtSPARQLResultsXML : mts ++ [mtAny]
+           -}
 
       baseHdrs = [ (NT.hAccept, acceptVals)
                  , ("Accept-Charset", "utf-8")
@@ -376,11 +422,13 @@ makeCall stream (uri, params) m mts = do
                    , requestHeaders = (NT.hContentType, "application/x-www-form-urlencoded") : baseHdrs
                    , requestBody = RequestBodyBS qs
                    }
-                 
+
+      u'' = u' { responseTimeout = queryTimeout opt }
+      
       request = if null uname
-            then u'
-            else applyBasicAuth (B8.pack uname) (B8.pack upass) u'
-  
+            then u''
+            else applyBasicAuth (B8.pack uname) (B8.pack upass) u''
+
   withManager $ \mgr -> do
     response <- http request mgr
     responseBody response $$+- stream
@@ -388,15 +436,16 @@ makeCall stream (uri, params) m mts = do
 -- TODO: should this catch HTTPException, or is this part of IOError?
     
 processResponse ::
-  ProcessResponseBody a  -- ^ process the response body
+  QueryOptions
+  -> ProcessResponseBody a  -- ^ process the response body
   -> (URI, [ExtraParameters])
   -> Method
   -> [MIMEType]
   -> IO (Either IOError a)
-processResponse stream u m mts =
+processResponse opt stream u m mts =
   let ehdl :: IOError -> IO (Either IOError a)
       ehdl = return . Left
   in CE.catch
-     (Right `liftM` makeCall stream u m mts)
+     (Right `liftM` makeCall opt stream u m mts)
      ehdl
 

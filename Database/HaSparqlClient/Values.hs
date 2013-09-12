@@ -10,7 +10,7 @@ module Database.HaSparqlClient.Values (
   , value 
     
     -- * XML representation
-  , showsparql
+  , ShowQuery(..)
   ) where
 
 import qualified Data.Text as T

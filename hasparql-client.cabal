@@ -25,9 +25,12 @@ Description:
     Changes:
     .
     * Version 0.5: Now uses the streaming API of
-    @xml-conduit@ to parse the SPARQL results document. There is,
-    at present, no API change, but processing the SPARQL results
-    document should require less memory.
+    @xml-conduit@ to parse the SPARQL results document, so that
+    processing SPARQL results should require less memory. The
+    @runQuery@, @runSelectQuery@, and @runAskQuery@ functions now
+    take a @QueryOptions@ structure (used to change the timeout
+    length when processing a query). The default timeout period is now
+    10 seconds. @ShowQuery@ is now exported from @Database.HaSparqlClient.Values@.
     .
     * Version 0.4: Changed the return of @runSelectQuery@ to include the
     variable names.
@@ -41,7 +44,7 @@ Description:
     optional graph. Removed the @ToSPARQL@ class.
     .
     * Version 0.2.1: support URIs which include HTTP Basic 
-    Authorization - e.g. @http://anonymous@localhost:5822/myDB@.
+    Authorization, such as @http:\/\/anonymous\@localhost:5822\/myDB@.
     .
     * Version 0.2.0: use of xml-conduit rather than xml;
     move to using @Text@ for strings in @BindingValue@;
@@ -66,6 +69,7 @@ Library
     base >= 4 && < 5,
     bytestring >= 0.9 && < 0.11,
     conduit == 1.0.*,
+    data-default == 0.5.*,
     HTTP == 4000.2.*,
     http-conduit >= 1.8 && < 2.0,
     http-types >= 0.7 && < 0.9,
