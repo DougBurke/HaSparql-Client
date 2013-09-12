@@ -5,6 +5,7 @@
 -}
 
 -- TODO: need to find out what the encoding is and use it to convert to Text
+--       Is this still true?
 
 {-
 The SPARQL response XML format is described at
@@ -23,33 +24,42 @@ module Database.HaSparqlClient.Queries
        , runAskQuery
        ) where
 
+import Control.Exception as CE
+
+import qualified Data.ByteString.Char8 as B8
+import qualified Data.Conduit.List as CL
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
+import qualified Data.XML.Types as XT
 
-import qualified Data.ByteString.Lazy.Char8 as L8
-import qualified Data.ByteString.Char8 as B8
+import qualified Network.HTTP.Types as NT
 
-import Control.Exception as CE
+import qualified Text.XML as X
+import qualified Text.XML.Stream.Parse as X
+
+import Control.Applicative ((<|>))
+import Control.Monad (liftM)
+import Control.Monad.Trans.Resource (MonadThrow, ResourceT)
+
+import Data.Char (toLower)
+import Data.Conduit (ConduitM, Sink, ($$+-), (=$=))
+import Data.Maybe (fromMaybe)
+import Data.Monoid (mconcat)
 
 import Network.URI
 import Network.HTTP.Conduit
-import qualified Network.HTTP.Types as NT
 import Network.HTTP (urlEncodeVars)
-
-import Text.XML
-import Text.XML.Cursor
-
-import Data.Char (toLower)
-import Data.Maybe
-import Data.Monoid (mconcat)
-
-import Control.Applicative ((<|>), (<$>))
-import Control.Monad (liftM)
 
 import qualified Database.HaSparqlClient.Types as HT
 import Database.HaSparqlClient.Types hiding (URI)
 import Paths_hasparql_client (version)
 import Data.Version (showVersion)
+
+-- Specializing to IO here
+type ProcessResponseBody a =
+  Sink B8.ByteString (ResourceT IO) a
+  -- ConduitM B8.ByteString Void (ResourceT IO)
+
 
 {- | Execute a service.
 
@@ -61,7 +71,7 @@ Returns an error message on failure. SPARUL and SPARQL can be performed.
 -}
 runQuery :: Service -> Method -> [MIMEType] -> IO (Either String T.Text)
 runQuery srv = getSparqlRequest 
-               (Right . T.decodeUtf8 . mconcat . L8.toChunks)
+               ((T.decodeUtf8 . mconcat) `liftM` CL.consume)
                (constructURI srv)
 
 -- | Find all possible values for a query of type @SELECT@, returning the bound variables.
@@ -100,24 +110,22 @@ runAskQuery serv m = getSparqlRequest
                      parseBooleanDocument
                      (constructURI serv) m []
 
-
 -- In case of success makes the request and transforms the result depending on the callback function.
 
-getSparqlRequest :: 
-  (L8.ByteString -> Either String b) 
+getSparqlRequest ::
+  ProcessResponseBody a
   -> Either String (URI, [ExtraParameters]) 
   -> Method
   -> [MIMEType] 
-  -> IO (Either String b)
-getSparqlRequest f u m mts = 
+  -> IO (Either String a)
+getSparqlRequest stream u m mts = 
   case u of
     Left err -> return $ Left err
     Right urivals -> do
-      resp <- getRespBody urivals m mts
+      resp <- processResponse stream urivals m mts
       case resp of
         Left err -> return $ Left (show err)
-        Right rsp -> return $ f rsp
-                                                                  
+        Right r -> return $ Right r
 
 -- QUS: Do we need to send in the mime type values into construct URI ???
 
@@ -135,25 +143,128 @@ constructURI (Sparql epoint qry defgs ngs oth) =
       keep = (`notElem` ["named-graph-uri", "default-graph-uri"]) . map toLower . fst
          
 -- Return the names of the variables and then the per-row value sets.
-parseResultsDocument :: L8.ByteString -> Either String ([T.Text], [[BindingValue]])
-parseResultsDocument d = case parseLBS def d of
-  Left se -> Left (show se)
-  Right doc -> 
-    let cursor = fromDocument doc
-        names = getVarNames cursor
-    in Right $ (names, getVarResults names cursor)
+parseResultsDocument :: ProcessResponseBody ([T.Text], [[BindingValue]])
+parseResultsDocument =
+  X.parseBytes X.def =$= parseSparqlResults
 
-parseBooleanDocument :: L8.ByteString -> Either String Bool
-parseBooleanDocument d = case parseLBS def d of
-  Left se -> Left (show se)
-  Right doc -> 
-    let cursor = fromDocument doc
-        txt = child cursor >>= element "{http://www.w3.org/2005/sparql-results#}boolean" >>= child >>= content
-    in case txt of
-      ["true"] -> Right True
-      ["false"] -> Right False
-      _ -> Left $ "Invalid boolean response:\n" ++ L8.unpack d
+-- Is the answer true of false?
+parseBooleanDocument :: ProcessResponseBody Bool
+parseBooleanDocument =
+  X.parseBytes X.def =$= parseSparqlBoolean
+  
+nSparql, nHead, nVariable, nResults, nResult, nBinding, nLiteral, nBnode, nUri :: X.Name
+nSparql = "{http://www.w3.org/2005/sparql-results#}sparql"
+nHead = "{http://www.w3.org/2005/sparql-results#}head"
+nVariable = "{http://www.w3.org/2005/sparql-results#}variable"
+nResults = "{http://www.w3.org/2005/sparql-results#}results"
+nResult = "{http://www.w3.org/2005/sparql-results#}result"
+nBinding = "{http://www.w3.org/2005/sparql-results#}binding"
+nLiteral = "{http://www.w3.org/2005/sparql-results#}literal"
+nBnode = "{http://www.w3.org/2005/sparql-results#}bnode"
+nUri = "{http://www.w3.org/2005/sparql-results#}uri"
 
+nBoolean, nLink :: X.Name
+nBoolean = "{http://www.w3.org/2005/sparql-results#}boolean"
+nLink = "{http://www.w3.org/2005/sparql-results#}link"
+
+nName, nDatatype :: X.Name
+nName = "name"
+nDatatype = "datatype"
+
+nLang :: X.Name
+nLang = "{http://www.w3.org/XML/1998/namespace}lang"
+
+-- NOTE: I had used X.tagNoAttr for many tags, but
+-- Virtuoso 7.0.0 added attributes to the results tag
+-- (e.g. <results distinct="false" ordered="true">)
+-- so I have decided to use this apporach instead,
+-- which ignores any attributes rather than requires
+-- there to be none.
+--
+tagNoAttr ::
+  (MonadThrow m)
+  => X.Name
+  -> ConduitM XT.Event o m b
+  -> ConduitM XT.Event o m (Maybe b)
+tagNoAttr name parser = X.tagName name X.ignoreAttrs $ const parser
+
+-- | Parse the SPARQL Boolean XML format (@ASK@).
+
+parseSparqlBoolean :: (MonadThrow m) => ConduitM XT.Event o m Bool
+parseSparqlBoolean =
+  X.force "sparql results" $ X.tagName nSparql X.ignoreAttrs $ \_ -> do
+    _ <- X.force "Unable to parse head tag" parseHead
+    X.force "boolean" $ tagNoAttr nBoolean $ do
+      cnt <- X.content
+      return $ cnt == "true"
+
+-- | Parse the SPARQL results XML format (@SELECT@).
+
+parseSparqlResults :: (MonadThrow m) => ConduitM XT.Event o m ([T.Text], [[BindingValue]])
+parseSparqlResults =
+  X.force "sparql results" $ X.tagName nSparql X.ignoreAttrs $ \_ -> do
+    varNames <- X.force "Unable to parse head tag" parseHead
+    results <- X.force "Unable to parse results tag" (parseResults varNames)
+    return (varNames, results)
+
+-- | Get the variable name from a variable tag.
+    
+parseVariable :: (MonadThrow m) => ConduitM XT.Event o m (Maybe T.Text)
+parseVariable = X.tagName nVariable (X.requireAttr nName) return
+
+-- | Extract the list of variable names from the head tag.
+--
+--   Any @link@ information is discarded.
+--
+parseHead :: (MonadThrow m) => ConduitM XT.Event o m (Maybe [T.Text])
+parseHead = tagNoAttr nHead $ do
+  res <- X.many parseVariable
+  _ <- X.many $ X.tagName nLink X.ignoreAttrs $ \_ -> return ()
+  return res
+
+-- | Parse the results section.
+
+parseResults ::
+  (MonadThrow m)
+  => [T.Text]    -- ^ order of variables
+  -> ConduitM XT.Event o m (Maybe [[BindingValue]])
+parseResults varNames =
+  tagNoAttr nResults $ X.many (parseResult varNames)
+  
+-- | Parse a set of bindings (a result tag).
+
+parseResult ::
+  (MonadThrow m)
+  => [T.Text]    -- ^ order of variables
+  -> ConduitM XT.Event o m (Maybe [BindingValue])
+parseResult varNames =
+  tagNoAttr nResult $ do
+    fs <- X.many parseBinding
+    return $ map (fromMaybe HT.Unbound . flip lookup fs) varNames 
+
+-- | Parse a binding tag.
+
+parseBinding :: (MonadThrow m) => ConduitM XT.Event o m (Maybe (T.Text, BindingValue))
+parseBinding = X.tagName nBinding (X.requireAttr nName) $ \name -> do
+  res <- X.force "Unable to parse contents of binding tag" $ X.choose [parseBNode, parseURIElem, parseLiteral]
+  return (name, res)
+
+parseBNode, parseURIElem, parseLiteral  :: (MonadThrow m) => ConduitM XT.Event o m (Maybe BindingValue)
+parseBNode = tagNoAttr nBnode $ HT.BNode `liftM` X.content
+
+parseURIElem = tagNoAttr nUri $ HT.URI `liftM` X.content
+
+parseLiteral = X.tagName nLiteral getLiteralAttr (`liftM` X.content)
+
+getLiteralAttr :: X.AttrParser (T.Text -> BindingValue)
+getLiteralAttr =
+  (flip TypedLiteral `liftM` X.requireAttr nDatatype)
+  <|>
+  (flip LangLiteral `liftM` X.requireAttr nLang)
+  <|>
+  (X.ignoreAttrs >> return HT.Literal)
+
+{-
 getVarNames :: Cursor -> [T.Text]
 getVarNames c = 
   child c >>= element "{http://www.w3.org/2005/sparql-results#}head" >>=
@@ -218,20 +329,15 @@ handleLiteral c =
     [x] -> [f x]
     _ -> []
 
-
-getRespBody ::
-  (URI, [ExtraParameters])
-  -> Method
-  -> [MIMEType]
-  -> IO (Either IOError L8.ByteString)
-getRespBody u m mts = CE.catch (Right `liftM` makeCall u m mts) (return . Left)
+-}
 
 makeCall ::
-  (URI, [ExtraParameters])
+  ProcessResponseBody a  -- ^ process the response body
+  -> (URI, [ExtraParameters])
   -> Method
   -> [MIMEType]
-  -> IO L8.ByteString
-makeCall (uri, params) m mts = do
+  -> IO a
+makeCall stream (uri, params) m mts = do
   -- strip out any basic authentication since parseUrl does not handle this
   let (uri', basicAuth) = case uriAuthority uri of
         Nothing -> (uri, "")
@@ -271,9 +377,26 @@ makeCall (uri, params) m mts = do
                    , requestBody = RequestBodyBS qs
                    }
                  
-      u'' = if null uname
+      request = if null uname
             then u'
             else applyBasicAuth (B8.pack uname) (B8.pack upass) u'
   
-  withManager $ fmap responseBody . httpLbs u''
+  withManager $ \mgr -> do
+    response <- http request mgr
+    responseBody response $$+- stream
+
+-- TODO: should this catch HTTPException, or is this part of IOError?
+    
+processResponse ::
+  ProcessResponseBody a  -- ^ process the response body
+  -> (URI, [ExtraParameters])
+  -> Method
+  -> [MIMEType]
+  -> IO (Either IOError a)
+processResponse stream u m mts =
+  let ehdl :: IOError -> IO (Either IOError a)
+      ehdl = return . Left
+  in CE.catch
+     (Right `liftM` makeCall stream u m mts)
+     ehdl
 

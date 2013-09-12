@@ -1,5 +1,5 @@
 Name:           hasparql-client
-Version:        0.4
+Version:        0.5
 License:        BSD3
 License-file:   LICENSE
 Author:         Luiz Damascena <luizscence@gmail.com>
@@ -23,6 +23,11 @@ Description:
     * Implement a parser to validate SPARQL queries.
     .
     Changes:
+    .
+    * Version 0.5: Now uses the streaming API of
+    @xml-conduit@ to parse the SPARQL results document. There is,
+    at present, no API change, but processing the SPARQL results
+    document should require less memory.
     .
     * Version 0.4: Changed the return of @runSelectQuery@ to include the
     variable names.
@@ -60,13 +65,16 @@ Library
   Build-depends: 
     base >= 4 && < 5,
     bytestring >= 0.9 && < 0.11,
+    conduit == 1.0.*,
     HTTP == 4000.2.*,
     http-conduit >= 1.8 && < 2.0,
     http-types >= 0.7 && < 0.9,
     mtl == 2.1.*,
     network >= 2.3 && < 2.5,
+    resourcet == 0.4.*,
     text == 0.11.*,
-    xml-conduit >= 1.0 && < 1.2
+    xml-conduit >= 1.0 && < 1.2,
+    xml-types == 0.3.*
 
   Exposed-modules:
     Database.HaSparqlClient
