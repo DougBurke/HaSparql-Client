@@ -71,12 +71,12 @@ Library
     conduit == 1.0.*,
     data-default == 0.5.*,
     HTTP == 4000.2.*,
-    http-conduit >= 1.8 && < 2.0,
+    http-conduit >= 1.8 && < 2.1,
     http-types >= 0.7 && < 0.9,
     mtl == 2.1.*,
     network >= 2.3 && < 2.5,
     resourcet == 0.4.*,
-    text == 0.11.*,
+    text >= 0.11 && < 1.2,
     xml-conduit >= 1.0 && < 1.2,
     xml-types == 0.3.*
 
