@@ -1,5 +1,5 @@
 Name:           hasparql-client
-Version:        0.5
+Version:        0.5.0.1
 License:        BSD3
 License-file:   LICENSE
 Author:         Luiz Damascena <luizscence@gmail.com>
@@ -31,6 +31,7 @@ Description:
     take a @QueryOptions@ structure (used to change the timeout
     length when processing a query). The default timeout period is now
     10 seconds. @ShowQuery@ is now exported from @Database.HaSparqlClient.Values@.
+    Hopefuly fix-up the handling of basic authorization.
     .
     * Version 0.4: Changed the return of @runSelectQuery@ to include the
     variable names.

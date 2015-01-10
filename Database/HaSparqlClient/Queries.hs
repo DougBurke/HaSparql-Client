@@ -392,9 +392,15 @@ makeCall opt stream (uri, params) m mts = do
       (uname, upass1) = break (==':') basicAuth
       upass = case upass1 of
         "" -> ""
-        ':':xs -> xs
+        ':':xs -> dropAt xs
         ys -> error $ "Unexpected password value of " ++ ys ++ " in URI: " ++ show uri
         
+      -- assume passwords are not long
+      dropAt = reverse . d . reverse
+          where
+            d ('@':xs) = xs
+            d xs = xs
+
   u <- parseUrl $ show uri'
   
   let acceptVals = -- should probably just use a single ByteString for default case
